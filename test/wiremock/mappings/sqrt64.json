@@ -7,8 +7,8 @@
     "status": 200,
     "body": "8",
     "headers": {
-        "Content-Type": "text/plain",
-        "Access-Control-Allow-Origin": "*"
-    } 
+      "Content-Type": "text/plain",
+      "Access-Control-Allow-Origin": "*"
+    }
   }
 }
