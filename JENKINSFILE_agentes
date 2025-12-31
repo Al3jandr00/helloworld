@@ -1,0 +1,266 @@
+pipeline {
+
+    agent none
+
+    stages {
+
+        /* =========================
+           GET CODE
+        ========================== */
+        stage('Get Code') {
+            agent any
+            steps {
+                git 'https://github.com/Al3jandr00/helloworld.git'
+                stash name: 'codigo', includes: '**/*'
+            }
+        }
+
+        /* =========================
+           PARALLEL STAGES
+        ========================== */
+        stage('Parallel Stages') {
+            parallel {
+
+                /* =====================================================
+                   AGENTE master  --> Unit + Coverage
+                ====================================================== */
+                stage('Unit + Coverage') {
+                    agent any
+                    stages {
+
+                        stage('Unstash codigo') {
+                            steps {
+                                unstash 'codigo'
+                            }
+                        }
+
+  stage('Agent info') {
+    steps {
+        echo "===== AGENT INFO ====="
+        echo "NODE_NAME: ${env.NODE_NAME}"
+        echo "WORKSPACE: ${env.WORKSPACE}"
+        bat 'whoami'
+        bat 'hostname'
+        echo "======================"
+    }
+}
+
+                        stage('venv 1') {
+                            steps {
+                                bat '''
+C:\\Users\\AlejandroFraga\\AppData\\Local\\Programs\\Python\\Python314\\python.exe -m venv venv
+venv\\Scripts\\pip install --upgrade pip
+venv\\Scripts\\pip install pytest coverage
+'''
+                            }
+                        }
+
+                        stage('Unit') {
+                            steps {
+                                bat """
+                                set PYTHONPATH=%WORKSPACE%
+                                venv\\Scripts\\coverage run --branch -m pytest --junitxml=result-unit.xml test\\unit
+                                venv\\Scripts\\coverage xml
+                                """
+                            }
+                            post {
+                                always {
+                                    junit 'result-unit.xml'
+                                }
+                            }
+                        }
+
+                        stage('Coverage') {
+                            steps {
+                                recordCoverage(
+                                    tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']],
+                                    qualityGates: [
+                                        [metric: 'LINE', threshold: 95.0, criticality: 'NOTE'],
+                                        [metric: 'LINE', threshold: 85.0, criticality: 'ERROR'],
+                                        [metric: 'BRANCH', threshold: 90.0, criticality: 'NOTE'],
+                                        [metric: 'BRANCH', threshold: 80.0, criticality: 'ERROR']
+                                    ]
+                                )
+                            }
+                        }
+                    }
+                }
+
+                /* =====================================================
+                   AGENTE 1 (win1)  --> Service + Performance
+                ====================================================== */
+                stage('Service + Performance') {
+                    agent { label 'win1' }
+                    stages {
+
+                        stage('Unstash codigo') {
+                            steps {
+                                unstash 'codigo'
+                            }
+                        }
+
+  stage('Agent info') {
+    steps {
+        echo "===== AGENT INFO ====="
+        echo "NODE_NAME: ${env.NODE_NAME}"
+        echo "WORKSPACE: ${env.WORKSPACE}"
+        bat 'whoami'
+        bat 'hostname'
+        echo "======================"
+    }
+}
+
+                        stage('venv 2') {
+                            steps {
+                                bat '''
+C:\\Users\\AlejandroFraga\\AppData\\Local\\Programs\\Python\\Python314\\python.exe -m venv venv
+venv\\Scripts\\pip install --upgrade pip
+venv\\Scripts\\pip install pytest flask
+'''
+                            }
+                        }
+
+                        stage('Service') {
+                            steps {
+                                bat '''
+set PYTHONPATH=%WORKSPACE%
+set FLASK_APP=app\\api.py
+
+start /B java -jar tools\\wiremock\\wiremock-jre8-standalone-2.28.0.jar ^
+  --port 9090 ^
+  -v ^
+  --root-dir test\\wiremock > wiremock.log 2>&1
+
+REM  Arrancar Flask
+start /B flask run > flask.log 2>&1
+
+REM Pausa para que arranquen FLASK y WIREMOCK
+ping 127.0.0.1 -n 5 > nul
+
+REM Tests REST
+venv\\Scripts\\pytest --junitxml=result-rest.xml test\\rest || echo REST tests failed
+'''
+                            }
+                            post {
+                                always {
+                                    junit 'result-rest.xml'
+                                }
+                            }
+                        }
+
+                        stage('Performance') {
+                            steps {
+                                bat '''
+set FLASK_APP=app\\api.py
+
+REM --- Start Flask ---
+start /B flask run > flask_perf.log 2>&1
+ping 127.0.0.1 -n 5 > nul
+
+REM --- JMeter ---
+C:\\Users\\AlejandroFraga\\Desktop\\CURSOS\\UNIR_DEVOPS\\apache-jmeter-5.6.3\\bin\\jmeter ^
+  -n ^
+  -t test\\jmeter\\Test_Plan.jmx ^
+  -f ^
+  -l Test_Plan.jtl
+
+REM --- Stop Flask ---
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr LISTENING ^| findstr :5000') do (
+    taskkill /PID %%a /F
+)
+'''
+                            }
+                            post {
+                                always {
+                                    perfReport sourceDataFiles: 'Test_Plan.jtl'
+                                }
+                            }
+                        }
+                    }
+                }
+
+                /* =====================================================
+                   AGENTE 2 (win2)  --> Static + Security
+                ====================================================== */
+                stage('Static + Security') {
+                    agent { label 'win2' }
+                    stages {
+
+                        stage('Unstash codigo') {
+                            steps {
+                                unstash 'codigo'
+                            }
+                        }
+
+ stage('Agent info') {
+    steps {
+        echo "===== AGENT INFO ====="
+        echo "NODE_NAME: ${env.NODE_NAME}"
+        echo "WORKSPACE: ${env.WORKSPACE}"
+        bat 'whoami'
+        bat 'hostname'
+        echo "======================"
+    }
+}
+
+                        stage('venv 3') {
+                            steps {
+                                bat '''
+C:\\Users\\AlejandroFraga\\AppData\\Local\\Programs\\Python\\Python314\\python.exe -m venv venv
+venv\\Scripts\\pip install --upgrade pip
+venv\\Scripts\\pip install flake8 bandit
+'''
+                            }
+                        }
+
+                        stage('Static Analysis') {
+                            steps {
+                                bat """
+                                venv\\Scripts\\flake8 app --count --statistics > flake8-report.txt 2>&1
+                                exit /B 0
+                                """
+                            }
+                            post {
+                                always {
+                                    recordIssues(
+                                        tools: [flake8(pattern: 'flake8-report.txt')],
+                                        enabledForFailure: true,
+                                        qualityGates: [
+                                            [threshold: 8, type: 'TOTAL', unstable: true],
+                                            [threshold: 10, type: 'TOTAL', unstable: false]
+                                        ]
+                                    )
+                                }
+                            }
+                        }
+
+                        stage('Security Analysis') {
+                            steps {
+                                bat '''
+venv\\Scripts\\bandit ^
+  --exit-zero ^
+  -r app ^
+  -t B310 ^
+  -f custom ^
+  -o bandit.out ^
+  --msg-template "{abspath}:{line}: [{test_id}] {msg}"
+'''
+                            }
+                            post {
+                                always {
+                                    recordIssues(
+                                        tools: [pyLint(name: 'Bandit', pattern: 'bandit.out')],
+                                        qualityGates: [
+                                            [threshold: 2, type: 'TOTAL', unstable: true],
+                                            [threshold: 4, type: 'TOTAL', unstable: false]
+                                        ]
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
